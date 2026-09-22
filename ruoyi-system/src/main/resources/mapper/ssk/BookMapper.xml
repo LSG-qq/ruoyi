@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.BookMapper">
+
+	<!-- 图书结果映射（表字段为下划线命名，此处显式映射，不依赖驼峰自动转换）
+	     created_by / updated_by 在表中只存用户ID，这里左连接 sys_user 取出姓名供列表展示 -->
+	<resultMap type="BookVo" id="BookVoResult">
+		<id     property="id"            column="id"              />
+		<result property="name"          column="name"            />
+		<result property="description"   column="description"     />
+		<result property="stockQuantity" column="stock_quantity"  />
+		<result property="author"        column="author"          />
+		<result property="categoryIds"   column="category_ids"    />
+		<result property="shelfCode"     column="shelf_code"      />
+		<result property="cover"         column="cover"           />
+		<result property="images"        column="images"          />
+		<result property="createdBy"     column="created_by"      />
+		<result property="createdAt"     column="created_at"      />
+		<result property="updatedBy"     column="updated_by"      />
+		<result property="updatedAt"     column="updated_at"      />
+		<result property="deleted"       column="deleted"         />
+		<result property="createdByName" column="created_by_name" />
+		<result property="updatedByName" column="updated_by_name" />
+	</resultMap>
+
+	<!-- 通用查询列 -->
+	<sql id="selectBookVo">
+        select b.id, b.name, b.description, b.stock_quantity, b.author, b.category_ids, b.shelf_code,
+               b.cover, b.images, b.created_by, b.created_at, b.updated_by, b.updated_at, b.deleted,
+               cu.nick_name as created_by_name, uu.nick_name as updated_by_name
+        from ssk_book b
+        left join sys_user cu on cu.user_id = b.created_by
+        left join sys_user uu on uu.user_id = b.updated_by
+    </sql>
+
+	<!-- 按条件分页查询图书：类目筛选传入的是「选中类目 + 其全部下级类目」的ID集合，逐个 find_in_set 匹配 -->
+	<select id="findPage" resultMap="BookVoResult">
+		<include refid="selectBookVo"/>
+		<where>
+			b.deleted = 0
+			<if test="book.name != null and book.name != ''">
+				and b.name like concat('%', #{book.name}, '%')
+			</if>
+			<if test="book.author != null and book.author != ''">
+				and b.author like concat('%', #{book.author}, '%')
+			</if>
+			<if test="book.shelfCode != null and book.shelfCode != ''">
+				and b.shelf_code = #{book.shelfCode}
+			</if>
+			<if test="categoryIdList != null and categoryIdList.size() > 0">
+				and (
+				<foreach collection="categoryIdList" item="categoryId" separator=" or ">
+					find_in_set(#{categoryId}, b.category_ids)
+				</foreach>
+				)
+			</if>
+		</where>
+		order by b.id desc
+	</select>
+
+	<!-- 根据主键查询图书 -->
+	<select id="findById" parameterType="Integer" resultMap="BookVoResult">
+		<include refid="selectBookVo"/>
+		where b.id = #{id} and b.deleted = 0
+	</select>
+
+	<!-- 新增图书 -->
+	<insert id="create" parameterType="Book" useGeneratedKeys="true" keyProperty="id">
+		insert into ssk_book(
+			name, description, stock_quantity, author, category_ids, shelf_code, cover, images,
+			created_by, created_at, deleted
+		)values(
+			#{name}, #{description}, #{stockQuantity}, #{author}, #{categoryIds}, #{shelfCode}, #{cover}, #{images},
+			#{createdBy}, #{createdAt}, 0
+		)
+	</insert>
+
+	<!-- 修改图书，可编辑字段无条件更新，以便支持清空封面与图片集 -->
+	<update id="updateById" parameterType="Book">
+		update ssk_book
+		<set>
+			name = #{name},
+			description = #{description},
+			stock_quantity = #{stockQuantity},
+			author = #{author},
+			category_ids = #{categoryIds},
+			shelf_code = #{shelfCode},
+			cover = #{cover},
+			images = #{images},
+			<if test="updatedBy != null">updated_by = #{updatedBy},</if>
+			<if test="updatedAt != null">updated_at = #{updatedAt},</if>
+		</set>
+		where id = #{id} and deleted = 0
+	</update>
+
+	<!-- 批量逻辑删除图书 -->
+	<update id="deleteByIds">
+		update ssk_book
+		set deleted = 1,
+			<if test="updatedBy != null">updated_by = #{updatedBy},</if>
+			updated_at = #{updatedAt}
+		where deleted = 0 and id in
+		<foreach collection="ids" item="id" open="(" separator="," close=")">
+			#{id}
+		</foreach>
+	</update>
+
+</mapper>
