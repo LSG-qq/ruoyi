@@ -250,6 +250,12 @@ export default {
         // 首节点固定为「全部」，默认选中该节点
         this.categoryTree = [{ id: 0, title: "全部", children: tree }]
         this.$nextTick(() => this.setCurrentCategory(this.queryParams.categoryId))
+      }).catch(() => {
+        // 类目接口失败时（常见原因：当前角色只授了 ssk:book:* ，缺 ssk:bookCategory:list）
+        // 仍保留「全部」节点，避免左侧树整个空掉而看不出是权限问题；
+        // 图书列表本身不依赖类目，照常可用。
+        this.categoryTree = [{ id: 0, title: "全部", children: [] }]
+        this.$nextTick(() => this.setCurrentCategory(this.queryParams.categoryId))
       })
     },
     /**

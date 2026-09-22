@@ -112,13 +112,21 @@ export default {
       this.reset()
       if (row && row.id) {
         this.title = "编辑图书"
+        // 详情加载成功后再打开弹窗。若失败（如该图书已被他人删除），保持关闭状态，
+        // 避免弹出一个空表单让用户以为可以编辑，提交后却报"修改失败"。
         this.loadDetail(row.id)
-      } else {
-        this.title = "新增图书"
-        // 左侧类目树选中具体类目时，自动带入为图书类目
-        if (defaultCategoryId) {
-          this.form.categoryIds = String(defaultCategoryId)
-        }
+          .then(() => {
+            this.visible = true
+          })
+          .catch(() => {
+            this.visible = false
+          })
+        return
+      }
+      this.title = "新增图书"
+      // 左侧类目树选中具体类目时，自动带入为图书类目
+      if (defaultCategoryId) {
+        this.form.categoryIds = String(defaultCategoryId)
       }
       this.visible = true
     },

@@ -80,7 +80,9 @@ export default {
     }
   },
   created() {
-    this.loadOptions()
+    // 加载失败时 options 保持空数组即可，错误提示由全局请求拦截器统一给出；
+    // 这里补 catch 是为了避免产生未处理的 promise 拒绝。
+    this.loadOptions().catch(() => {})
   },
   methods: {
     /** 加载类目树数据 */

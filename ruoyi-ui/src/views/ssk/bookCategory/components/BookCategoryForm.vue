@@ -93,13 +93,22 @@ export default {
       this.reset()
       if (row) {
         this.title = "编辑图书类目"
-        // 先回填表单再加载上级下拉，确保下拉能正确选中当前上级类目
-        this.loadDetail(row.id).then(() => this.loadOptions(row.id))
-      } else {
-        this.title = parentRow ? "新增子类目" : "新增图书类目"
-        this.form.parentId = parentRow ? parentRow.id : 0
-        this.loadOptions(null)
+        // 先回填表单再加载上级下拉，确保下拉能正确选中当前上级类目。
+        // 两步都成功后才打开弹窗：若失败（如该类目已被他人删除），保持关闭状态，
+        // 避免弹出空表单让用户以为可以编辑，提交后却报"修改失败"。
+        this.loadDetail(row.id)
+          .then(() => this.loadOptions(row.id))
+          .then(() => {
+            this.visible = true
+          })
+          .catch(() => {
+            this.visible = false
+          })
+        return
       }
+      this.title = parentRow ? "新增子类目" : "新增图书类目"
+      this.form.parentId = parentRow ? parentRow.id : 0
+      this.loadOptions(null)
       this.visible = true
     },
     /** 表单重置 */
@@ -130,6 +139,10 @@ export default {
         const tree = this.handleTree(response.data, "id", "parentId", "children")
         // 构造虚拟顶级节点，便于把类目直接挂在顶级下
         this.categoryOptions = [{ id: 0, title: "顶级类目", children: tree }]
+      }).catch(() => {
+        // 内部消化异常：上级下拉加载失败时至少保留「顶级类目」节点，
+        // 避免下拉整个空掉。此处不再向外抛，弹窗的关闭与否由详情接口决定。
+        this.categoryOptions = [{ id: 0, title: "顶级类目", children: [] }]
       })
     },
     /** 转换组件所需的下拉树结构 */
