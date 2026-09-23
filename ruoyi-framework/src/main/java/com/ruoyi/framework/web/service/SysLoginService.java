@@ -52,7 +52,20 @@ public class SysLoginService
     private ISysConfigService configService;
 
     /**
+     * 登录准入校验：按角色决定该账号能否登录本服务
+     * <p>
+     * 管理后台与终端服务共用一张 sys_user，靠各自 application.yml 的
+     * login.allowed-roles / login.denied-roles 区分准入范围。
+     */
+    @Autowired
+    private LoginRoleService loginRoleService;
+
+    /**
      * 登录验证
+     * <p>
+     * 校验顺序：验证码 → 登录前置校验（含 IP 黑名单）→ 密码 → 角色准入 → 写成功日志 → 签发 token。
+     * 认证失败与被准入拒绝都会写一条失败日志（后者是为了留下「越权尝试登录」的审计痕迹）；
+     * 被准入拒绝时不会签发 token，也不会在 redis 里留下 {@code login_tokens:*} 键。
      * 
      * @param username 用户名
      * @param password 密码
@@ -92,8 +105,22 @@ public class SysLoginService
         {
             AuthenticationContextHolder.clearContext();
         }
-        AsyncManager.me().execute(AsyncFactory.recordLogininfor(username, Constants.LOGIN_SUCCESS, MessageUtils.message("user.login.success")));
         LoginUser loginUser = (LoginUser) authentication.getPrincipal();
+        // 登录准入校验：按角色决定该账号能否登录本服务（终端只放行囚犯，管理后台禁入囚犯）
+        // 位置必须在密码校验之后、成功日志与 token 之前，理由见 LoginRoleService 类注释
+        try
+        {
+            loginRoleService.checkAccess(loginUser.getUser());
+        }
+        catch (ServiceException e)
+        {
+            // 与「账号已停用」同类：拒绝也要留一条失败日志，
+            // 「囚犯试图登录管理后台」在监区场景下正是需要留痕的审计事件。
+            // 记的是服务端的登录日志，不回传给调用方，因此不影响响应的信息量。
+            AsyncManager.me().execute(AsyncFactory.recordLogininfor(username, Constants.LOGIN_FAIL, e.getMessage()));
+            throw e;
+        }
+        AsyncManager.me().execute(AsyncFactory.recordLogininfor(username, Constants.LOGIN_SUCCESS, MessageUtils.message("user.login.success")));
         recordLoginInfo(loginUser.getUserId());
         // 生成token
         return tokenService.createToken(loginUser);

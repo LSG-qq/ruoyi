@@ -1,4 +1,4 @@
-package com.ruoyi.web.biz.ssk;
+package com.ruoyi.system.biz.ssk;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -6,6 +6,8 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,6 +17,7 @@ import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.system.domain.Book;
 import com.ruoyi.system.domain.BookCategory;
 import com.ruoyi.system.domain.vo.BookVo;
+import com.ruoyi.system.domain.vo.ClientBookVo;
 import com.ruoyi.system.service.IBookCategoryService;
 import com.ruoyi.system.service.IBookService;
 
@@ -26,6 +29,7 @@ import com.ruoyi.system.service.IBookService;
  *     <li>查询条件为空时不参与过滤，类目筛选为「选中类目 + 其全部下级类目」；</li>
  *     <li>类目ID集统一去重、去空格后按英文逗号拼接，并校验类目确实存在；</li>
  *     <li>图片集最多 5 张，统一去重去空格后按英文逗号拼接，封面固定取第一张图；</li>
+ *     <li>库存是借阅运营量：新增时接受初始库存，修改时忽略（库存只由借出/归还按增量变动）；</li>
  *     <li>创建人、创建时间、更新人、更新时间、逻辑删除标记全部由后端生成，不接受前端传入。</li>
  * </ul>
  *
@@ -96,6 +100,52 @@ public class BookBiz
     }
 
     /**
+     * 按条件分页查询图书（终端浏览用）
+     *
+     * <p>与后台列表共用同一套查询条件、类目展开与分页（直接复用 {@link #findPage}），
+     * 差别只在**返回字段**：审计字段（created_by / created_at / updated_by / updated_at / deleted）
+     * 属于内部运营信息，终端不需要也不应该拿到，因此投影成 {@link ClientBookVo}。
+     * 不直接返回 BookVo 的目的正是避免这些字段出现在终端响应体里。</p>
+     *
+     * <p>投影安排在分页之后：PageHelper 的分页参数在调用链的第一次查询就被消费掉了，
+     * 这里只是在已分页的结果上做字段裁剪，不会影响总数与每页条数。</p>
+     *
+     * @param book       查询条件（书籍名称、作者、书架号），为空表示不带条件
+     * @param categoryId 选中的类目ID，为空或 0 表示「全部」
+     * @return 图书集合（仅终端可见字段）
+     */
+    public List<ClientBookVo> findClientPage(Book book, Integer categoryId)
+    {
+        List<ClientBookVo> result = new ArrayList<>();
+        for (BookVo source : findPage(book, categoryId))
+        {
+            result.add(toClientBook(source));
+        }
+        return result;
+    }
+
+    /**
+     * 把图书展示对象裁剪为终端可见字段
+     *
+     * @param source 含审计字段的图书展示对象
+     * @return 仅含终端可见字段的图书对象
+     */
+    private ClientBookVo toClientBook(BookVo source)
+    {
+        ClientBookVo target = new ClientBookVo();
+        target.setId(source.getId());
+        target.setName(source.getName());
+        target.setDescription(source.getDescription());
+        target.setAuthor(source.getAuthor());
+        target.setCategoryIds(source.getCategoryIds());
+        target.setShelfCode(source.getShelfCode());
+        target.setCover(source.getCover());
+        target.setImages(source.getImages());
+        target.setStockQuantity(source.getStockQuantity());
+        return target;
+    }
+
+    /**
      * 新增图书
      *
      * @param book 图书信息
@@ -109,6 +159,10 @@ public class BookBiz
             throw new ServiceException("图书信息不能为空");
         }
         applyEditableFields(book, bookCategoryService.findList());
+        // 库存只在新增时有意义：为空按默认库存处理，负数在这里被拒绝。
+        // 校验放在调用方而不是 applyEditableFields 里，是为了让"修改图书"完全不碰库存
+        // —— 被忽略的字段不应该还能让整单失败。
+        book.setStockQuantity(normalizeStockQuantity(book.getStockQuantity()));
         // 主键与审计字段一律由后端生成
         book.setId(null);
         book.setCreatedBy(currentUserId());
@@ -122,6 +176,9 @@ public class BookBiz
     /**
      * 修改图书
      *
+     * <p>可修改的是书籍属性，不含库存：库存是借阅运营量，只由借出/归还经库存增量语句变动。
+     * 若编辑时把表单上的库存一起落库，用户在弹窗里停留期间发生的借出/归还就会被这次编辑覆盖掉。</p>
+     *
      * @param book 图书信息
      * @return 结果
      */
@@ -134,6 +191,9 @@ public class BookBiz
         }
         requireBook(book.getId());
         applyEditableFields(book, bookCategoryService.findList());
+        // 库存不参与修改：置空后数据层不会更新 stock_quantity 列。
+        // 即便调用方直接传了库存（绕过前端），也在这里被丢掉，由后端兜底而不是指望前端不传。
+        book.setStockQuantity(null);
         // 创建信息与逻辑删除标记不允许被前端覆盖
         book.setCreatedBy(null);
         book.setCreatedAt(null);
@@ -176,6 +236,9 @@ public class BookBiz
     /**
      * 处理可编辑字段：校验、去空格、格式化类目与图片集，并派生封面
      *
+     * <p>刻意不含库存：库存在新增与修改下的归属不同（新增落初始库存、修改完全忽略），
+     * 由各自的调用方显式处理，见 {@link #create} 与 {@link #updateById}。</p>
+     *
      * @param book       图书信息，方法内直接修改该对象
      * @param categories 全部未删除的类目，用于校验类目ID是否合法
      */
@@ -185,7 +248,6 @@ public class BookBiz
         book.setDescription(requireText(book.getDescription(), DESCRIPTION_MAX_LENGTH, "书籍描述"));
         book.setAuthor(requireText(book.getAuthor(), AUTHOR_MAX_LENGTH, "作者"));
         book.setShelfCode(requireText(book.getShelfCode(), SHELF_CODE_MAX_LENGTH, "书架号"));
-        book.setStockQuantity(normalizeStockQuantity(book.getStockQuantity()));
         book.setCategoryIds(normalizeCategoryIds(book.getCategoryIds(), categories));
         String images = normalizeImages(book.getImages());
         book.setImages(images);
@@ -205,9 +267,28 @@ public class BookBiz
         {
             return null;
         }
-        List<BookCategory> all = bookCategoryService.findList();
-        Set<Integer> ids = collectSelfAndDescendantIds(all, categoryId);
-        return new ArrayList<>(ids);
+        // 取「全部类目」是一次真实的 SQL，而 PageHelper 的 startPage() 只对**下一条** SQL 生效。
+        // 控制器是 startPage() → findPage()，本方法又在 findPage() 内部先被调用，
+        // 若不作处理，被分页的就会是这次类目查询而不是图书查询，后果有两个：
+        //   a) 类目清单被截到每页条数（默认 10 条），展开出的下级类目因此不完整，筛选结果偏少；
+        //   b) 真正的图书查询完全失去分页，一页返回全部命中数据，分页器形同虚设。
+        // 做法：把当前的 Page 取出来并清掉，让类目查询以「无分页」状态执行，
+        // 结束后再放回去，使随后那条图书查询拿到本该属于它的分页参数。
+        Page<?> page = PageHelper.getLocalPage();
+        PageHelper.clearPage();
+        try
+        {
+            List<BookCategory> all = bookCategoryService.findList();
+            Set<Integer> ids = collectSelfAndDescendantIds(all, categoryId);
+            return new ArrayList<>(ids);
+        }
+        finally
+        {
+            if (page != null)
+            {
+                PageHelper.setLocalPage(page);
+            }
+        }
     }
 
     /**
@@ -316,7 +397,9 @@ public class BookBiz
     /**
      * 校验并返回规范化的库存，空值按默认库存处理
      *
-     * @param stockQuantity 库存
+     * <p>只被新增流程调用：图书创建时必须落一个初始库存，负数在这里被拒绝。</p>
+     *
+     * @param stockQuantity 新增时提交的初始库存
      * @return 归一化后的库存
      */
     private Integer normalizeStockQuantity(Integer stockQuantity)

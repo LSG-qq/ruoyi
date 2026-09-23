@@ -101,6 +101,16 @@ token:
   # 令牌有效期（默认30分钟）
   expireTime: 30
 
+# 登录准入配置
+# 管理后台与终端服务共用一张 sys_user，靠这里的配置划清「哪些角色能登录本进程」。
+# 校验由 framework 层的 LoginRoleService 在登录时执行，两端逻辑同一份。
+login:
+  # 禁止登录本服务的角色，逗号分隔；留空表示不限制（黑名单优先级高于白名单）。
+  # 囚犯账号只能在终端（ruoyi-client）登录，管理后台一律禁入：
+  # 管理端有一批「只要求登录、没挂 @PreAuthorize」的接口（/common/upload、/common/download、
+  # /test/user/* 等），放进来等于把文件上传下载与演示接口对囚犯开放。
+  denied-roles: ssk_prisoner
+
 # MyBatis配置
 mybatis:
   # 搜索指定包别名

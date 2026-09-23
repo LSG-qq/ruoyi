@@ -34,6 +34,17 @@ public class BookServiceImpl implements IBookService
     }
 
     /**
+     * 查询全部未删除图书，仅返回借阅下拉所需字段
+     *
+     * @return 图书集合
+     */
+    @Override
+    public List<BookVo> findOptionList()
+    {
+        return bookMapper.findOptionList();
+    }
+
+    /**
      * 根据主键查询图书
      *
      * @param id 主键
@@ -81,5 +92,20 @@ public class BookServiceImpl implements IBookService
     public int deleteByIds(Integer[] ids, Integer updatedBy, Date updatedAt)
     {
         return bookMapper.deleteByIds(ids, updatedBy, updatedAt);
+    }
+
+    /**
+     * 按主键调整图书库存，借出与归还共用
+     *
+     * @param id        书籍ID
+     * @param delta     库存增量，借出传 -1，归还传 1
+     * @param updatedBy 操作人ID
+     * @param updatedAt 操作时间
+     * @return 结果
+     */
+    @Override
+    public int updateStockById(Integer id, int delta, Integer updatedBy, Date updatedAt)
+    {
+        return bookMapper.updateStockById(id, delta, updatedBy, updatedAt);
     }
 }

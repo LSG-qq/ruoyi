@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.BorrowRequestMapper">
+
+	<!--
+		借阅申请结果映射（表字段为下划线命名，此处显式映射，不依赖驼峰自动转换）。
+		映射分两组：
+		  第一组是 ssk_borrow_request 自身的字段，与实体 BorrowRequest 一一对应；
+		  第二组是展示用字段（书籍信息、审核人姓名），来自关联表，只存在于 BorrowRequestVo。
+	-->
+	<resultMap type="BorrowRequestVo" id="BorrowRequestVoResult">
+		<!-- 第一组：借阅申请自身字段 -->
+		<id     property="id"             column="id"              />
+		<result property="bookId"         column="book_id"         />
+		<result property="prisonerNumber" column="prisoner_number" />
+		<result property="borrowDays"     column="borrow_days"     />
+		<result property="status"         column="status"          />
+		<result property="createdAt"      column="created_at"      />
+		<result property="updatedBy"      column="updated_by"      />
+		<result property="updatedAt"      column="updated_at"      />
+		<result property="deleted"        column="deleted"         />
+		<!-- 第二组：展示用字段，来自 ssk_book 与 sys_user -->
+		<result property="bookName"       column="book_name"       />
+		<result property="bookAuthor"     column="book_author"     />
+		<result property="bookShelfCode"  column="book_shelf_code" />
+		<result property="bookCover"      column="book_cover"      />
+		<result property="updatedByName"  column="updated_by_name" />
+	</resultMap>
+
+	<!--
+		通用查询列。
+		书籍信息左连接 ssk_book，刻意不过滤 b.deleted：书籍被逻辑删除后，
+		历史申请仍要能显示出书名与书架号，否则列表会出现一整片空白，
+		管理员既看不出申请的是哪本书，也无法判断该怎么处理。
+		审核人姓名左连接 sys_user，同样**不过滤 uu.del_flag**：
+		用户被删之后，历史申请上的审核人姓名仍要显示得出来。
+		待处理的申请 updated_by 本就为 NULL，左连接取不到姓名，前端显示为空即可。
+	-->
+	<sql id="selectBorrowRequestVo">
+        select r.id, r.book_id, r.prisoner_number, r.borrow_days, r.status, r.created_at, r.updated_by, r.updated_at, r.deleted,
+               b.name       as book_name,
+               b.author     as book_author,
+               b.shelf_code as book_shelf_code,
+               b.cover      as book_cover,
+               uu.nick_name as updated_by_name
+        from ssk_borrow_request r
+        left join ssk_book b on b.id = r.book_id
+        left join sys_user uu on uu.user_id = r.updated_by
+    </sql>
+
+	<!--
+		按条件分页查询借阅申请。
+		书籍名称模糊匹配；状态为等值匹配。
+		排序用「申请时间倒序 + 主键倒序」，主键兜底保证同一秒提交的申请顺序稳定，
+		否则翻页时可能出现同一条记录出现两次或漏掉。
+	-->
+	<select id="findPage" resultMap="BorrowRequestVoResult">
+		<include refid="selectBorrowRequestVo"/>
+		<where>
+			r.deleted = 0
+			<if test="bookName != null and bookName != ''">
+				and b.name like concat('%', #{bookName}, '%')
+			</if>
+			<if test="status != null and status != ''">
+				and r.status = #{status}
+			</if>
+		</where>
+		order by r.created_at desc, r.id desc
+	</select>
+
+	<!--
+		根据主键查询借阅申请，返回结构与列表完全一致（同一个 resultMap）。
+		审核前的校验依赖这条语句，因此必须带 deleted = 0：
+		已逻辑删除的申请不允许再被同意或拒绝。
+	-->
+	<select id="findById" parameterType="Integer" resultMap="BorrowRequestVoResult">
+		<include refid="selectBorrowRequestVo"/>
+		where r.id = #{id} and r.deleted = 0
+	</select>
+
+	<!--
+		更新申请状态。
+		where 里的 status = #{expectedStatus} 是「只有待处理才能被处理」的落地点，
+		也是并发下只允许一个人成功的乐观锁：
+		两个请求同时进来时，后到的那次会等前一个事务提交后再判断状态，条件不再成立，影响行数为 0。
+		注意这里不能省略 status 条件改写成无条件 update，那会让重复点击「同意」
+		把已经生成过借阅记录的申请再处理一遍。
+	-->
+	<update id="updateStatusById">
+		update ssk_borrow_request
+		set status = #{status},
+			updated_by = #{updatedBy},
+			updated_at = #{updatedAt}
+		where id = #{id}
+		  and deleted = 0
+		  and status = #{expectedStatus}
+	</update>
+	<!--
+		按囚号分页查询本人的申请（终端的「我的申请」）。
+		与 findPage 的关键差别是囚号用**等值**匹配而不是模糊匹配：
+		like 下囚号 20260001 会命中 20260011 等一切包含它的串，终端场景里那等于把别人的
+		申请暴露给本人，属于越权而非体验问题。后台的囚号筛选是「检索」语义（用户会输入片段），
+		因此那边保持 like 不变，两边刻意不共用同一条语句。
+		排序与后台列表一致（申请时间倒序 + 主键倒序），主键兜底保证同一秒提交的顺序稳定。
+	-->
+	<select id="findPageByPrisoner" resultMap="BorrowRequestVoResult">
+		<include refid="selectBorrowRequestVo"/>
+		<where>
+			r.deleted = 0
+			and r.prisoner_number = #{prisonerNumber}
+			<if test="status != null and status != ''">
+				and r.status = #{status}
+			</if>
+		</where>
+		order by r.created_at desc, r.id desc
+	</select>
+
+	<!--
+		统计某囚号对某本书仍处于「待处理」的申请数。
+		这是「同一囚号同书只能有一条待处理申请」的第一层拦截，只用于给出可读提示；
+		真正的并发兜底是唯一索引 uk_ssk_borrow_request_active
+		（生成列 active_request_key 只在 deleted = 0 且 status = 'ready' 时算出值）。
+	-->
+	<select id="countReadyByBookAndPrisoner" resultType="int">
+		select count(1)
+		from ssk_borrow_request
+		where deleted = 0
+		  and book_id = #{bookId}
+		  and prisoner_number = #{prisonerNumber}
+		  and status = 'ready'
+	</select>
+
+	<!--
+		新增借阅申请（写入方只有终端）。
+		囚号、申请时间、状态由业务层从登录令牌与系统时间取得后写入：
+		borrow_days 是囚犯在终端选定的天数，status 固定写 ready，created_at 为提交时刻，
+		deleted 固定写 0；updated_by / updated_at 是审核字段，此处不写，保持 NULL。
+		生成列 active_request_key 不在这里赋值，由数据库自动算出；
+		因此重复提交会撞上唯一索引抛 DuplicateKeyException，由业务层转成可读提示。
+	-->
+	<insert id="create" parameterType="BorrowRequest" useGeneratedKeys="true" keyProperty="id">
+		insert into ssk_borrow_request(
+			book_id, prisoner_number, borrow_days, status, created_at, deleted
+		)values(
+			#{bookId}, #{prisonerNumber}, #{borrowDays}, #{status}, #{createdAt}, 0
+		)
+	</insert>
+
+</mapper>

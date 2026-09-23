@@ -1,0 +1,128 @@
+-- ----------------------------------------------------------------------------
+-- 终端囚犯账号初始化脚本（模块名：ssk）
+--
+-- 【必读】本脚本含中文，必须让连接字符集为 utf8mb4，否则中文会以乱码入库，
+--   而且用同样的错误字符集读回来时"看起来又是对的"，极易漏过。
+--   本文件第 1 条语句已内置 SET NAMES utf8mb4，正常情况无需额外处理；
+--   若你的客户端忽略该语句，请在命令行显式指定：
+--     mysql -uroot -p ry_vue --default-character-set=utf8mb4 < sql/ssk_prisoner_account.sql
+--   （Windows 下 mysql 客户端默认字符集常为 gbk/936，直接重定向执行必然乱码）
+--   【注意】本脚本与其他 ssk_*.sql 一样不写 USE，表名不带库前缀，
+--   因此执行时必须像上面那样把库名（ry_vue）写在命令行里，否则报 "No database selected"。
+--
+-- 内容：1. 囚犯角色 ssk_prisoner（无任何菜单授权）
+--       2. 监区部门（囚犯账号的归属部门）
+--       3. （可选）演示囚犯账号，默认注释掉
+--       4. 说明
+-- 说明：脚本可重复执行，全部用 exists 判断后再插入，不会产生重复数据。
+--
+-- 【前置】本脚本只建「角色」与「部门」这类基础设施。账号本身（谁、叫什么、密码多少）
+--   由业务方按实际名册录入，脚本只给模板，不预先造人。
+--
+-- 【为什么登录准入靠角色、而不是 sys_user.user_type】
+--   终端服务（ruoyi-client）与管理后台（ruoyi-admin）是两个进程、共用同一张 sys_user。
+--   两端靠各自 application.yml 的 login.allowed-roles / login.denied-roles 划分准入范围：
+--     ruoyi-client/application.yml :  login.allowed-roles: ssk_prisoner
+--     ruoyi-admin/application.yml  :  login.denied-roles:  ssk_prisoner
+--   校验由 framework 层的 LoginRoleService 在登录时执行（密码校验通过之后、签发 token 之前）。
+--   角色值就是本脚本插入的 sys_role.role_key，两者必须逐字一致，改一边就要改另一边。
+--
+-- 【囚号即登录名】囚犯的 sys_user.user_name 直接填囚号，不额外建映射表、不加列。
+--   终端只需要知道「当前登录的是哪个囚号」，从令牌里取 user_name 就够。
+--
+-- 【重要】囚犯账号**必须**被授予 ssk_prisoner 角色，否则登不进终端：
+--   终端配的是白名单（allowed-roles 非空），角色集与该白名单无交集就会被拒。
+--   只建账号、不分配角色，登录时会得到「当前账号无权登录本系统，请联系管理员」。
+--
+-- ID 分配：本脚本占用 sys_role.role_id = 3、sys_dept.dept_id = 110。
+--   现库 sys_role 只有 1(admin) / 2(common)，自增值为 100（后台新建角色从 100 起）；
+--   现库 sys_dept 占用 100~109，自增值为 200（后台新建部门从 200 起）。
+--   取 3 与 110 都在自增区间之外，不会和今后在后台新建的角色/部门撞号。
+-- ----------------------------------------------------------------------------
+
+SET NAMES utf8mb4;
+
+-- ----------------------------
+-- 1、囚犯角色
+--    role_key = ssk_prisoner，与两端 application.yml 里写的角色值必须完全一致。
+--    data_scope 取 5（仅本人数据权限）：囚犯按设计登不进管理后台，
+--    这一项只是纵深防御——万一准入配置被改错放进来，也不要让他看到别人的数据。
+--    本角色**不授予任何菜单**：它不用于管理后台，sys_role_menu 里不该出现它的记录。
+-- ----------------------------
+insert into sys_role (role_id, role_name, role_key, role_sort, data_scope, menu_check_strictly, dept_check_strictly, status, del_flag, create_by, create_time, remark)
+select 3, '囚犯', 'ssk_prisoner', 5, '5', 0, 0, '0', '0', 'admin', sysdate(), '终端借阅账号角色，仅用于登录终端服务，不授予任何管理端菜单'
+from dual where not exists (select 1 from sys_role where role_key = 'ssk_prisoner');
+
+-- ----------------------------
+-- 2、监区部门
+--    囚犯账号的归属部门。做成独立的一级部门（parent_id = 0、ancestors = '0'），
+--    挂在「若依科技」下面在语义上并不合适。
+--    若贵方已有现成的监区部门，直接改下面这条语句的 dept_id / dept_name，
+--    或者跳过本段、在后台按自己的组织结构建。
+--    注意 sys_dept 表没有 remark 列（不像 sys_role 有），别照抄角色那条语句的字段列表。
+-- ----------------------------
+insert into sys_dept (dept_id, parent_id, ancestors, dept_name, order_num, leader, status, del_flag, create_by, create_time)
+select 110, 0, '0', '监区', 10, '', '0', '0', 'admin', sysdate()
+from dual where not exists (select 1 from sys_dept where dept_id = 110);
+
+-- ----------------------------
+-- 3、（可选）演示囚犯账号 —— 默认注释掉，需要联调时自行取消注释
+--
+--    正式环境请勿执行本段：账号密码写死在脚本里等于留了一个后门，
+--    真实囚犯账号请在「系统管理 - 用户管理」逐个新增，或在后台导入名册。
+--
+--    密码哈希必须是 BCrypt（若依的 passwordEncoder 是 BCryptPasswordEncoder）。
+--    生成方式（任意一种）：
+--      · 后台「用户管理 - 新增/重置密码」由系统自己算，最省事，推荐；
+--      · 用 jshell 手算（JDK 17 自带，classpath 指向本机 maven 仓库里的 spring-security-crypto，
+--        版本号按实际依赖改，本工程是 7.0.3）：
+--          jshell --class-path ~/.m2/repository/org/springframework/security/spring-security-crypto/7.0.3/spring-security-crypto-7.0.3.jar
+--          jshell> String h = org.springframework.security.crypto.bcrypt.BCrypt.hashpw("明文密码", org.springframework.security.crypto.bcrypt.BCrypt.gensalt(10));
+--          jshell> System.out.println(h);
+--        注意 jshell 里不要直接敲裸的 hashpw 表达式——返回值在交互式输出里可能被截断，
+--        用 System.out.println 打印完整字符串，再回验一次：
+--          jshell> System.out.println(org.springframework.security.crypto.bcrypt.BCrypt.checkpw("明文密码", h));
+--    下面这条演示账号的明文口令是 Prisoner@2026，仅用于联调，用完请改密或删号。
+--    user_type 用 '00'（系统用户）即可：账号由管理端开立，不是自助注册的用户。
+-- ----------------------------
+-- insert into sys_user (user_id, dept_id, user_name, nick_name, user_type, password, status, del_flag, create_by, create_time, remark)
+-- select 3, 110, '20260001', '演示囚犯', '00', '$2a$10$ZGrv694gt2tJowj98GCjIuRqahUrqc/jsuEUJZ9mhBjj6lSOMrxCm', '0', '0', 'admin', sysdate(), '联调用演示囚犯账号，上线前请删除或改密'
+-- from dual where not exists (select 1 from sys_user where user_name = '20260001');
+--
+-- -- 账号必须配角色，否则终端白名单不匹配、登不进去（见文件头说明）
+-- insert into sys_user_role (user_id, role_id)
+-- select u.user_id, r.role_id
+-- from sys_user u, sys_role r
+-- where u.user_name = '20260001' and r.role_key = 'ssk_prisoner'
+--   and not exists (select 1 from sys_user_role ur where ur.user_id = u.user_id and ur.role_id = r.role_id);
+
+-- ----------------------------
+-- 4、说明
+-- ----------------------------
+-- 1）新增一个囚犯账号，需要同时做两件事，缺一不可：
+--      a. 建 sys_user，user_name 填囚号；
+--      b. 在 sys_user_role 里把该账号关联到 ssk_prisoner 角色。
+--    后台操作路径：系统管理 - 用户管理 - 新增，用户名填囚号，部门选「监区」，
+--    角色勾选「囚犯」。只勾角色不建账号、或只建账号不勾角色，都登录不了。
+-- 2）本脚本不修改 admin / ry 等既有账号，也不会动到已有的角色与部门。
+--    全部语句都是 exists 判断后插入，重复执行只会跳过。
+-- 3）执行完建议自查：
+--      select r.role_id, r.role_name, r.role_key, r.status from sys_role r where r.role_key = 'ssk_prisoner';
+--      select d.dept_id, d.dept_name, d.parent_id from sys_dept d where d.dept_id = 110;
+--      -- 某个囚犯账号的角色是否配好（把 user_name 换成实际囚号）
+--      select u.user_name, r.role_key from sys_user u
+--        left join sys_user_role ur on ur.user_id = u.user_id
+--        left join sys_role r on r.role_id = ur.role_id
+--        where u.user_name = '20260001';
+-- 4）两端登录表现（改完 role_key 或 yml 配置后都要重启服务）：
+--      囚犯账号     → 终端 8081 可登录，管理后台 8080 返回「当前账号无权登录本系统」
+--      admin / ry   → 管理后台 8080 可登录，终端 8081 返回同样提示
+--    被准入拒绝时会写一条**失败**登录日志（status = 1，日志内容即上面那句提示），
+--    方便在「系统管理 - 日志管理 - 登录日志」里发现「囚犯账号在试图登录管理后台」这类越权尝试；
+--    但不会签发令牌、也不会在 redis 里留下 login_tokens:* 键。
+-- 5）终端业务接口的鉴权策略与后台不同：囚犯不该持有 ssk:* 这类管理端权限位，
+--    因此终端接口只校验「已登录」，再由业务层限制「只能看到/操作本人的数据」
+--    （囚号从令牌的 user_name 取）。本角色因此不需要、也不应该勾选任何菜单。
+-- 6）启用或禁用某个囚犯，改 sys_user.status 即可（'0' 正常 / '1' 停用），
+--    停用后两端都登不进去，提示「您的账号已停用」。不要用删除来停用：
+--    删号会让历史借阅记录里的关联查询失去依据。

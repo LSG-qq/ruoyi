@@ -4,7 +4,12 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.ruoyi.system.mapper.BookCategoryMapper">
 
-	<!-- 图书分类结果映射（表字段为下划线命名，此处显式映射，不依赖驼峰自动转换） -->
+	<!--
+		图书分类结果映射（表字段为下划线命名，此处显式映射，不依赖驼峰自动转换）。
+		映射的 10 个属性与 ssk_book_category 的 10 列一一对应，没有任何关联查询字段，
+		因此这里不需要像 BookMapper 那样再建一个 VO 来承载连接出来的展示字段；
+		树形展示所需的 children 由前端拿到列表后用 handleTree 组装。
+	-->
 	<resultMap type="BookCategory" id="BookCategoryResult">
 		<id     property="id"        column="id"         />
 		<result property="parentId"  column="parent_id"  />
@@ -18,26 +23,45 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		<result property="deleted"   column="deleted"    />
 	</resultMap>
 
-	<!-- 通用查询列 -->
+	<!--
+		通用查询列。
+		deleted 也一并查出来：调用方拿到行就能判断是否已被逻辑删除，
+		不必为了确认状态再发一次带 deleted = 0 的查询。
+	-->
 	<sql id="selectBookCategoryVo">
         select id, parent_id, order_num, title, remark, created_by, created_at, updated_by, updated_at, deleted
         from ssk_book_category
     </sql>
 
-	<!-- 查询全部未删除的图书分类，顶级类目优先，同级按显示排序、主键升序 -->
+	<!--
+		查询全部未删除的图书分类。
+		不做分页：类目数据量小，前端要一次性拿全量后在内存里组装成树，分页会让树缺枝。
+		排序 parent_id asc, order_num asc, id asc 的理由：
+		  parent_id 让同一个上级的子类目聚在一起；
+		  MySQL 的 asc 把 NULL 排在最前，所以顶级类目天然排在结果集最前面；
+		  id 兜底保证 order_num 相同时顺序稳定，否则每次刷新顺序可能不同。
+	-->
 	<select id="findList" resultMap="BookCategoryResult">
 		<include refid="selectBookCategoryVo"/>
 		where deleted = 0
 		order by parent_id asc, order_num asc, id asc
 	</select>
 
-	<!-- 根据主键查询图书分类 -->
+	<!--
+		根据主键查询图书分类。
+		带上 deleted = 0，已逻辑删除的类目不对外可见，命中 0 行即表示「不存在或已被删除」。
+	-->
 	<select id="findById" parameterType="Integer" resultMap="BookCategoryResult">
 		<include refid="selectBookCategoryVo"/>
 		where id = #{id} and deleted = 0
 	</select>
 
-	<!-- 统计同层级下同名类目数量，parentId 为空表示在顶级类目范围内校验 -->
+	<!--
+		统计同层级下同名类目数量，供新增/修改时的同级重名校验使用（> 0 即判定为重名）。
+		parentId 为空表示在顶级类目范围内校验，此时必须写 parent_id is null 而不是 parent_id = null：
+		SQL 里任何值与 NULL 比较结果都是 NULL，写成 = null 会永远查不出行，重名校验直接失效。
+		excludeId 只在修改时传，用于把类目自己排除掉，否则「只改备注不改名」也会被判成重名。
+	-->
 	<select id="countByTitle" resultType="int">
 		select count(1) from ssk_book_category
 		where deleted = 0 and title = #{title}
@@ -48,7 +72,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		<if test="excludeId != null">and id != #{excludeId}</if>
 	</select>
 
-	<!-- 新增图书分类 -->
+	<!--
+		新增图书分类。
+		parentId 为空时不写这一列，让数据库保持 NULL 来表示顶级类目
+		（业务层已把 null 与 0 统一归一化为 null，所以这里的判空是可靠的）。
+		order_num 无数据库默认值，由业务层兜底（空值落 0，负数直接抛错）；
+		deleted 固定写 0；created_by / created_at 由业务层生成后传入。
+	-->
 	<insert id="create" parameterType="BookCategory" useGeneratedKeys="true" keyProperty="id">
 		insert into ssk_book_category(
 			<if test="parentId != null">parent_id,</if>
@@ -59,7 +89,15 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		)
 	</insert>
 
-	<!-- 修改图书分类，title / remark / order_num 无条件更新以便支持清空备注 -->
+	<!--
+		修改图书分类。
+		parent_id / order_num / title / remark 四列无条件更新（不写 if 判空），
+		这样才能把备注清空成 NULL，也才支持换上级、改排序；
+		这么做是安全的：业务层每次修改都会回填这四个字段的完整值（见 BookCategoryBiz.updateById），
+		不存在「前端没传就被覆盖成 NULL」的情况。
+		updated_by / updated_at 则用 if 包住，避免调用方漏传时把原值覆盖成 NULL。
+		where 带 deleted = 0，已删除的类目不允许再被修改。
+	-->
 	<update id="updateById" parameterType="BookCategory">
 		update ssk_book_category
 		<set>
@@ -73,7 +111,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		where id = #{id} and deleted = 0
 	</update>
 
-	<!-- 批量更新显示排序，一次 update 完成，避免逐条提交 -->
+	<!--
+		批量更新显示排序。
+		用一条 update 的 case id 分支完成，避免前端拖动排序时逐条提交、逐条开事务。
+		入参由业务层重新构造，只含 id 与 orderNum，所以这条语句不可能被用来改名称或上级。
+		where 同时限定 deleted = 0 与 id in，已删除的类目不会被顺带改动；
+		updated_at 无条件写：批量排序是一次明确的运营动作，必然要留痕。
+	-->
 	<update id="updateSortByIds">
 		update ssk_book_category
 		set order_num = case id
@@ -89,7 +133,12 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		</foreach>
 	</update>
 
-	<!-- 批量逻辑删除图书分类 -->
+	<!--
+		批量逻辑删除图书分类：只把 deleted 置 1，不做物理删除，已删除的类目仍可追溯。
+		传进来的 id 集合由业务层展开过「自身 + 全部下级」并去重，所以级联删除在业务层完成，
+		这条语句只负责按集合更新。
+		条件里带 deleted = 0，重复删除是幂等的（影响行数为 0），也不会改动已删除行的更新时间。
+	-->
 	<update id="deleteByIds">
 		update ssk_book_category
 		set deleted = 1,

@@ -24,6 +24,13 @@ public interface IBookService
     public List<BookVo> findPage(Book book, List<Integer> categoryIdList);
 
     /**
+     * 查询全部未删除图书，仅返回借阅下拉所需字段
+     *
+     * @return 图书集合（仅 id、name、author、shelfCode、stockQuantity 有值）
+     */
+    public List<BookVo> findOptionList();
+
+    /**
      * 根据主键查询图书
      *
      * @param id 主键
@@ -56,4 +63,15 @@ public interface IBookService
      * @return 结果
      */
     public int deleteByIds(Integer[] ids, Integer updatedBy, Date updatedAt);
+
+    /**
+     * 按主键调整图书库存，借出与归还共用
+     *
+     * @param id        书籍ID
+     * @param delta     库存增量，借出传 -1，归还传 1
+     * @param updatedBy 操作人ID
+     * @param updatedAt 操作时间
+     * @return 结果，0 表示库存不足或书籍不存在
+     */
+    public int updateStockById(Integer id, int delta, Integer updatedBy, Date updatedAt);
 }

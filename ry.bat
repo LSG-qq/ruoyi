@@ -1,7 +1,20 @@
 @echo off
 
 rem jar平级目录
-set AppName=ruoyi-admin.jar
+rem 第一个参数指定要管理的服务，默认 ruoyi-admin.jar（管理后台）。本工程有两个可独立启动的入口：
+rem   ry.bat                       管理后台（ruoyi-admin.jar，端口 8080）
+rem   ry.bat ruoyi-client.jar      终端服务（ruoyi-client.jar，端口 8081）
+rem 两者可以同时运行，按各自 jar 名分别启停。
+set AppName=%1
+if "%AppName%"=="" set AppName=ruoyi-admin.jar
+
+if not exist "%AppName%" (
+	echo.
+	echo 当前目录下找不到 %AppName%
+	echo 请先执行 mvn package，并在 jar 同级目录运行本脚本
+	PAUSE
+	EXIT /B 1
+)
 
 rem JVM参数
 set JVM_OPTS="-Dname=%AppName%  -Duser.timezone=Asia/Shanghai -Xms512m -Xmx1024m -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError -XX:+PrintGCDateStamps  -XX:+PrintGCDetails -XX:NewRatio=1 -XX:SurvivorRatio=30 -XX:+UseParallelGC -XX:+UseParallelOldGC"

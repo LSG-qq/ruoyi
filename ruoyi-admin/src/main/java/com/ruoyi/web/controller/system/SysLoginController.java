@@ -5,36 +5,31 @@ import java.util.List;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-import com.ruoyi.common.constant.Constants;
 import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.domain.entity.SysMenu;
 import com.ruoyi.common.core.domain.entity.SysUser;
-import com.ruoyi.common.core.domain.model.LoginBody;
 import com.ruoyi.common.core.domain.model.LoginUser;
 import com.ruoyi.common.core.text.Convert;
 import com.ruoyi.common.utils.DateUtils;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.StringUtils;
-import com.ruoyi.framework.web.service.SysLoginService;
 import com.ruoyi.framework.web.service.SysPermissionService;
 import com.ruoyi.framework.web.service.TokenService;
 import com.ruoyi.system.service.ISysConfigService;
 import com.ruoyi.system.service.ISysMenuService;
 
 /**
- * 登录验证
+ * 登录后的用户信息与路由
+ * <p>
+ * 登录本身（POST /login）已下沉到 framework 的 AuthController，管理后台与终端服务共用一份实现；
+ * 本类只保留管理后台专用的「取当前用户信息」与「取前端路由菜单」。
  * 
  * @author ruoyi
  */
 @RestController
 public class SysLoginController
 {
-    @Autowired
-    private SysLoginService loginService;
-
     @Autowired
     private ISysMenuService menuService;
 
@@ -46,23 +41,6 @@ public class SysLoginController
 
     @Autowired
     private ISysConfigService configService;
-
-    /**
-     * 登录方法
-     * 
-     * @param loginBody 登录信息
-     * @return 结果
-     */
-    @PostMapping("/login")
-    public AjaxResult login(@RequestBody LoginBody loginBody)
-    {
-        AjaxResult ajax = AjaxResult.success();
-        // 生成令牌
-        String token = loginService.login(loginBody.getUsername(), loginBody.getPassword(), loginBody.getCode(),
-                loginBody.getUuid());
-        ajax.put(Constants.TOKEN, token);
-        return ajax;
-    }
 
     /**
      * 获取用户信息

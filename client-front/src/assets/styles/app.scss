@@ -1,0 +1,116 @@
+/**
+ * 终端前端的全局样式文件。
+ *
+ * <p>agents.md 的 client-front 代码规范要求「统一的样式文件为 app.scss」，本文件是
+ * 全站唯一在 main.js 里引入的样式入口，职责有两个：</p>
+ * <ol>
+ *   <li>把 theme.scss 的变量导出成 CSS 自定义属性（<code>:root</code>），供各页面
+ *       <code>&lt;style scoped&gt;</code> 用 <code>var()</code> 取用；</li>
+ *   <li>放**全局生效**的基础规则（盒模型、根节点高度、body 字体与底色、链接、表格悬停等）。</li>
+ * </ol>
+ *
+ * <p>单个页面自己的排版一律写在各自组件的 scoped 样式里，不往这里堆 —— 否则改一个页面
+ * 的样式会牵动整站，排查时也说不清某条规则到底是谁加的。element-ui 的组件样式由
+ * main.js 引入其自带的 theme-chalk 样式表，本文件不覆盖它。</p>
+ */
+
+@import './theme.scss';
+
+/* ------------------------------------------------------------------
+   1. 变量导出：让 scoped 样式也能取到 theme.scss 里定义的值
+   ------------------------------------------------------------------ */
+
+:root {
+  /* 主色与状态色 */
+  --client-primary: #{$client-primary};
+  --client-success: #{$client-success};
+  --client-warning: #{$client-warning};
+  --client-danger: #{$client-danger};
+  --client-info: #{$client-info};
+
+  /* 文字与背景 */
+  --client-text-primary: #{$client-text-primary};
+  --client-text-regular: #{$client-text-regular};
+  --client-text-secondary: #{$client-text-secondary};
+  --client-bg-page: #{$client-bg-page};
+  --client-bg-card: #{$client-bg-card};
+  --client-bg-muted: #{$client-bg-muted};
+  --client-border: #{$client-border};
+
+  /* 字号 */
+  --client-font-title: #{$client-font-title};
+  --client-font-lg: #{$client-font-lg};
+  --client-font-md: #{$client-font-md};
+  --client-font-base: #{$client-font-base};
+  --client-font-sm: #{$client-font-sm};
+  --client-font-xs: #{$client-font-xs};
+
+  /* 间距与圆角 */
+  --client-gap: #{$client-gap};
+  --client-gap-sm: #{$client-gap-sm};
+  --client-radius: #{$client-radius};
+  --client-radius-card: #{$client-radius-card};
+  --client-tap-height: #{$client-tap-height};
+}
+
+/* ------------------------------------------------------------------
+   2. 全局基础规则
+   ------------------------------------------------------------------ */
+
+/* 统一盒模型：让 width 包含 padding 与 border，算栅格宽度时不会超出一列 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* 根节点撑满视口：Layout 用 flex 分栏（顶部栏 + 菜单 + 内容区）依赖这条 */
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
+  font-size: $client-font-base;
+  color: $client-text-primary;
+  background-color: $client-bg-page;
+  /* 终端屏幕上字体边缘更毛糙，开抗锯齿让笔画干净一些 */
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* 触摸屏没有鼠标悬停，指到哪一行要更明显地反馈出来 */
+.el-table--enable-row-hover .el-table__body tr:hover > td {
+  background-color: #ecf5ff;
+}
+
+/* ------------------------------------------------------------------
+   3. 通用工具类
+   ------------------------------------------------------------------ */
+
+/*
+  表格与列表的空态。
+  Element UI 2.x **没有** el-empty 组件（那是 Element Plus / Vue3 才有的），
+  所以这里用普通 div 配这个类，不要照 Vue3 项目的写法抄 <el-empty>，
+  否则标签不识别、空态直接不显示（本项目实际踩过一次，见 2026-09-23 的审查记录）。
+*/
+.empty-tip {
+  padding: 26px 0;
+  font-size: $client-font-base;
+  color: $client-text-secondary;
+  text-align: center;
+}
+
+/* 终端的主按钮（提交申请、查询等）加大一号，便于触摸点选 */
+.btn-large {
+  padding: 12px 26px;
+  font-size: $client-font-md;
+}

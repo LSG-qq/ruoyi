@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.BorrowRecordMapper">
+
+	<!--
+		借阅记录结果映射（表字段为下划线命名，此处显式映射，不依赖驼峰自动转换）。
+		映射分两组：
+		  第一组是 ssk_borrow_record 自身的字段，与实体 BorrowRecord 一一对应；
+		  第二组是展示用字段（书籍信息与借阅状态），来自关联表或 SQL 计算，只存在于 BorrowRecordVo。
+	-->
+	<resultMap type="BorrowRecordVo" id="BorrowRecordVoResult">
+		<!-- 第一组：借阅记录自身字段 -->
+		<id     property="id"               column="id"                 />
+		<result property="bookId"           column="book_id"            />
+		<result property="prisonerNumber"   column="prisoner_number"    />
+		<result property="borrowTime"       column="borrow_time"        />
+		<result property="returnTime"       column="return_time"        />
+		<result property="actualReturnTime" column="actual_return_time" />
+		<result property="createdBy"        column="created_by"         />
+		<result property="createdAt"        column="created_at"         />
+		<result property="updatedBy"        column="updated_by"         />
+		<result property="updatedAt"        column="updated_at"         />
+		<result property="deleted"          column="deleted"            />
+		<!-- 第二组：展示用字段，来自 ssk_book 或 SQL 计算 -->
+		<result property="bookName"         column="book_name"          />
+		<result property="bookAuthor"       column="book_author"        />
+		<result property="bookShelfCode"    column="book_shelf_code"    />
+		<result property="bookCover"        column="book_cover"         />
+		<result property="status"           column="status"             />
+	</resultMap>
+
+	<!--
+		通用查询列。
+		书籍信息左连接 ssk_book，刻意不过滤 b.deleted：书籍被逻辑删除后，
+		历史借阅记录仍要能显示出书名与书架号，否则列表会出现一片空白。
+		借阅状态在 SQL 中统一计算，供列表展示与状态筛选共用同一套口径：
+		  已归还 —— 实际归还时间不为空；
+		  已逾期 —— 未归还且应还时间已过；
+		  借出中 —— 其余（未归还且未到期）。
+		注意：本查询列不包含生成列 active_borrow_key，它是约束用的技术列，不参与展示。
+	-->
+	<sql id="selectBorrowRecordVo">
+        select r.id, r.book_id, r.prisoner_number, r.borrow_time, r.return_time, r.actual_return_time,
+               r.created_by, r.created_at, r.updated_by, r.updated_at, r.deleted,
+               b.name       as book_name,
+               b.author     as book_author,
+               b.shelf_code as book_shelf_code,
+               b.cover      as book_cover,
+               case
+                   when r.actual_return_time is not null then 'returned'
+                   when r.return_time &lt; now() then 'overdue'
+                   else 'borrowing'
+               end as status
+        from ssk_borrow_record r
+        left join ssk_book b on b.id = r.book_id
+    </sql>
+
+	<!--
+		按条件分页查询借阅记录。
+		囚号与书籍名称都是模糊匹配；状态筛选刻意写在 SQL 里而不是查出来再过滤，
+		这样 PageHelper 统计的总数与实际返回的行数才一致。
+		排序用「借出时间倒序 + 主键倒序」，主键兜底保证同一时刻借出的记录顺序稳定，
+		否则翻页时可能出现同一条记录出现两次或漏掉。
+	-->
+	<select id="findPage" resultMap="BorrowRecordVoResult">
+		<include refid="selectBorrowRecordVo"/>
+		<where>
+			r.deleted = 0
+			<if test="record.prisonerNumber != null and record.prisonerNumber != ''">
+				and r.prisoner_number like concat('%', #{record.prisonerNumber}, '%')
+			</if>
+			<if test="bookName != null and bookName != ''">
+				and b.name like concat('%', #{bookName}, '%')
+			</if>
+			<if test="status != null and status == 'returned'">
+				and r.actual_return_time is not null
+			</if>
+			<if test="status != null and status == 'overdue'">
+				and r.actual_return_time is null and r.return_time &lt; now()
+			</if>
+			<if test="status != null and status == 'borrowing'">
+				and r.actual_return_time is null and r.return_time &gt;= now()
+			</if>
+		</where>
+		order by r.borrow_time desc, r.id desc
+	</select>
+
+	<!--
+		按囚号分页查询本人的借阅记录（终端的「我的借阅」）。
+		与 findPage 的关键差别是囚号用**等值**匹配：
+		findPage 里的 like '%囚号%' 是给后台检索用的，囚号 20260001 会命中 20260011 等
+		一切包含它的串，终端直接复用等于把别人的借阅记录暴露给本人，属于越权而非体验问题。
+		因此这里单独出一条语句，两边刻意不共用；状态计算与筛选口径则与后台完全一致。
+		排序与后台列表一致（借出时间倒序 + 主键倒序），主键兜底保证同一时刻借出的顺序稳定。
+	-->
+	<select id="findPageByPrisoner" resultMap="BorrowRecordVoResult">
+		<include refid="selectBorrowRecordVo"/>
+		<where>
+			r.deleted = 0
+			and r.prisoner_number = #{prisonerNumber}
+			<if test="status != null and status == 'returned'">
+				and r.actual_return_time is not null
+			</if>
+			<if test="status != null and status == 'overdue'">
+				and r.actual_return_time is null and r.return_time &lt; now()
+			</if>
+			<if test="status != null and status == 'borrowing'">
+				and r.actual_return_time is null and r.return_time &gt;= now()
+			</if>
+		</where>
+		order by r.borrow_time desc, r.id desc
+	</select>
+
+	<!--
+		根据主键查询借阅记录，返回结构与列表完全一致（同一个 resultMap）。
+		业务层还书前的校验与详情接口共用这条语句，因此这里必须带上 deleted = 0，
+		已逻辑删除的记录不再允许被操作。
+	-->
+	<select id="findById" parameterType="Integer" resultMap="BorrowRecordVoResult">
+		<include refid="selectBorrowRecordVo"/>
+		where r.id = #{id} and r.deleted = 0
+	</select>
+
+	<!--
+		统计某囚号对某本书尚未归还的记录数，用于借出前的重复借阅校验。
+		这个统计是「先查后插」的第一层拦截，只用于给出可读的提示信息；
+		真正的并发兜底是唯一索引 uk_ssk_borrow_record_active（见 sql/ssk_borrow_record.sql）。
+		走 idx_ssk_borrow_record_book_id 索引，count(1) 不需要读取行数据。
+	-->
+	<select id="countActiveByBookAndPrisoner" resultType="int">
+		select count(1)
+		from ssk_borrow_record
+		where deleted = 0
+		  and book_id = #{bookId}
+		  and prisoner_number = #{prisonerNumber}
+		  and actual_return_time is null
+	</select>
+
+	<!--
+		新增借阅记录。
+		审计字段与逻辑删除标记一律由后端生成，实际归还时间固定写入 null。
+		生成列 active_borrow_key 不在这里赋值，由数据库按 deleted 与 actual_return_time 自动算出；
+		因此重复借阅会撞上唯一索引，抛出 DuplicateKeyException，由业务层转成可读提示。
+	-->
+	<insert id="create" parameterType="BorrowRecord" useGeneratedKeys="true" keyProperty="id">
+		insert into ssk_borrow_record(
+			book_id, prisoner_number, borrow_time, return_time, actual_return_time,
+			created_by, created_at, deleted
+		)values(
+			#{bookId}, #{prisonerNumber}, #{borrowTime}, #{returnTime}, null,
+			#{createdBy}, #{createdAt}, 0
+		)
+	</insert>
+
+	<!--
+		归还图书：写入实际归还时间。
+		条件里带 actual_return_time is null，重复还书或并发还书时影响行数为 0，只会有一次成功。
+		归还后生成列 active_borrow_key 变为 NULL，唯一约束自动释放，该囚号可再次借出同一本书。
+	-->
+	<update id="updateReturnById">
+		update ssk_borrow_record
+		set actual_return_time = #{actualReturnTime},
+			updated_by = #{updatedBy},
+			updated_at = #{updatedAt}
+		where id = #{id}
+		  and deleted = 0
+		  and actual_return_time is null
+	</update>
+
+</mapper>

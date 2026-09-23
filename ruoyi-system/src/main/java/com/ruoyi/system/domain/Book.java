@@ -1,9 +1,7 @@
 package com.ruoyi.system.domain;
 
 import java.util.Date;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
@@ -12,6 +10,27 @@ import com.fasterxml.jackson.annotation.JsonFormat;
  *
  * <p>字段严格对应数据库表 ssk_book，不额外增加表以外的属性；
  * 列表展示所需的创建人/更新人姓名由 {@link com.ruoyi.system.domain.vo.BookVo} 承载。</p>
+ *
+ * <p>字段与表列的对应关系如下（14 个字段对 14 列，一个不多一个不少）：</p>
+ * <pre>
+ *   id            -> id             主键
+ *   name          -> name           书籍名称
+ *   description   -> description    简介
+ *   stockQuantity -> stock_quantity 可借库存，只由借出/归还按增量维护，编辑图书不改它
+ *   author        -> author         作者
+ *   categoryIds   -> category_ids   类目ID集，多个类目以英文逗号拼接，如 "3,7,12"
+ *   shelfCode     -> shelf_code     书架号，取值来自字典 book_shelfs
+ *   cover         -> cover          封面，后端由 images 的第一张派生，不接受前端传值
+ *   images        -> images         图片集，英文逗号分隔，最多 5 张
+ *   createdBy     -> created_by     创建者用户ID（int，不是用户名）
+ *   createdAt     -> created_at     创建时间
+ *   updatedBy     -> updated_by     更新者用户ID
+ *   updatedAt     -> updated_at     更新时间
+ *   deleted       -> deleted        逻辑删除标记，false 未删除 / true 已删除
+ * </pre>
+ *
+ * <p>本表不继承若依内置的 BaseEntity：审计字段名为 created_by / created_at / updated_by / updated_at，
+ * 且 created_by 存的是用户ID（int），与 BaseEntity 的 create_by（varchar 用户名）不一致。</p>
  *
  * @author ruoyi
  */
@@ -30,9 +49,16 @@ public class Book
     @Size(max = 500, message = "书籍描述长度不能超过500个字符")
     private String description;
 
-    /** 库存，默认 1 */
-    @NotNull(message = "库存不能为空")
-    @Min(value = 0, message = "库存不能小于0")
+    /**
+     * 库存，默认 1
+     *
+     * <p>本实体同时用于新增与修改，实体上的校验注解对两个操作**同时**生效，而库存只在新增时有意义
+     * （修改图书完全不碰库存，由借出/归还维护），所以这里刻意不加 {@code @NotNull} 与 {@code @Min}：
+     * 加了会让「修改图书」因为一个它根本不用、也不提交的字段被参数校验拦下。</p>
+     *
+     * <p>库存的校验全部收在 {@code BookBiz.normalizeStockQuantity}（只被新增流程调用）：
+     * 为空落默认库存 1，负数抛「库存不能小于0」。前端另外用 {@code el-input-number :min="0"} 做界面层限制。</p>
+     */
     private Integer stockQuantity;
 
     /** 作者 */

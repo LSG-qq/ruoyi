@@ -20,7 +20,7 @@ import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.system.domain.Book;
 import com.ruoyi.system.domain.vo.BookVo;
-import com.ruoyi.web.biz.ssk.BookBiz;
+import com.ruoyi.system.biz.ssk.BookBiz;
 
 /**
  * 图书管理

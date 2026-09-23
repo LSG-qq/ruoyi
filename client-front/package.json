@@ -1,0 +1,46 @@
+{
+  "name": "client-front",
+  "version": "3.9.2",
+  "description": "囚犯图书借阅终端",
+  "author": "ruoyi",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "vue-cli-service serve",
+    "build:prod": "vue-cli-service build"
+  },
+  "keywords": [
+    "vue",
+    "client",
+    "prison",
+    "library"
+  ],
+  "dependencies": {
+    "axios": "0.30.3",
+    "core-js": "3.37.1",
+    "element-ui": "2.15.14",
+    "js-cookie": "3.0.1",
+    "nprogress": "0.2.0",
+    "vue": "2.6.12",
+    "vue-router": "3.4.9",
+    "vuex": "3.6.0"
+  },
+  "devDependencies": {
+    "@vue/cli-plugin-babel": "4.4.6",
+    "@vue/cli-service": "4.4.6",
+    "babel-plugin-dynamic-import-node": "2.3.3",
+    "compression-webpack-plugin": "6.1.2",
+    "sass": "1.32.13",
+    "sass-loader": "10.1.1",
+    "script-ext-html-webpack-plugin": "2.1.5",
+    "vue-template-compiler": "2.6.12"
+  },
+  "engines": {
+    "node": ">=8.9",
+    "npm": ">= 3.0.0"
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions"
+  ]
+}

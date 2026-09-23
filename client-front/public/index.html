@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!--
+  终端前端的 HTML 壳。
+  只提供挂载点 <div id="app"></div>，页面内容全部由 Vue 渲染；
+  标题取自 vue.config.js 里的 configureWebpack.name（即 VUE_APP_TITLE），
+  所以改标题只需要改 .env 文件，不用动这里。
+-->
+<html lang="zh-CN">
+  <head>
+    <!-- 终端后端返回的中文按 UTF-8 编码，页面必须声明一致，否则提示语会乱码 -->
+    <meta charset="utf-8">
+    <!-- 一体机/触摸屏上常见的旧内核浏览器（如 360 兼容模式）按最高版本渲染 -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <!-- 终端屏幕尺寸不一，按设备宽度自适应，不做固定宽度布局 -->
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title><%= webpackConfig.name %></title>
+  </head>
+  <body>
+    <!-- 单页应用完全依赖 JS，脚本被策略拦掉时给一句明确提示，而不是白屏 -->
+    <noscript>
+      <strong>本终端需要启用 JavaScript 才能使用，请调整浏览器设置后重试。</strong>
+    </noscript>
+    <div id="app"></div>
+    <!-- built files will be auto injected -->
+  </body>
+</html>

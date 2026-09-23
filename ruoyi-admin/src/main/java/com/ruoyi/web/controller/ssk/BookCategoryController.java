@@ -17,7 +17,7 @@ import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.system.domain.BookCategory;
-import com.ruoyi.web.biz.ssk.BookCategoryBiz;
+import com.ruoyi.system.biz.ssk.BookCategoryBiz;
 
 /**
  * 图书类目管理

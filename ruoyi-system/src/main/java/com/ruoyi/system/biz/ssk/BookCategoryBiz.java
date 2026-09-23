@@ -1,4 +1,4 @@
-package com.ruoyi.web.biz.ssk;
+package com.ruoyi.system.biz.ssk;
 
 import java.util.ArrayList;
 import java.util.Date;

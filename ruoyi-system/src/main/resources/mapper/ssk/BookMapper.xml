@@ -4,9 +4,16 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.ruoyi.system.mapper.BookMapper">
 
-	<!-- 图书结果映射（表字段为下划线命名，此处显式映射，不依赖驼峰自动转换）
-	     created_by / updated_by 在表中只存用户ID，这里左连接 sys_user 取出姓名供列表展示 -->
+	<!--
+		图书结果映射（表字段为下划线命名，此处显式映射，不依赖驼峰自动转换）。
+		映射分两组：
+		  第一组是 ssk_book 自身的字段，与实体 Book 一一对应；
+		  第二组是 created_by_name / updated_by_name，来自左连接 sys_user ——
+		    表中 created_by / updated_by 只存用户ID，列表要展示姓名，
+		    按项目规范「实体不加表外字段」，这两个字段只存在于 BookVo。
+	-->
 	<resultMap type="BookVo" id="BookVoResult">
+		<!-- 第一组：图书自身字段 -->
 		<id     property="id"            column="id"              />
 		<result property="name"          column="name"            />
 		<result property="description"   column="description"     />
@@ -21,11 +28,16 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		<result property="updatedBy"     column="updated_by"      />
 		<result property="updatedAt"     column="updated_at"      />
 		<result property="deleted"       column="deleted"         />
+		<!-- 第二组：关联查询出来的展示字段 -->
 		<result property="createdByName" column="created_by_name" />
 		<result property="updatedByName" column="updated_by_name" />
 	</resultMap>
 
-	<!-- 通用查询列 -->
+	<!--
+		通用查询列：两次左连接 sys_user 分别取创建人与更新人的昵称。
+		关联条件是 user_id，只要用户被删除或不存在，昵称会是 NULL，
+		列表里对应列显示为空即可，不影响图书本身的数据。
+	-->
 	<sql id="selectBookVo">
         select b.id, b.name, b.description, b.stock_quantity, b.author, b.category_ids, b.shelf_code,
                b.cover, b.images, b.created_by, b.created_at, b.updated_by, b.updated_at, b.deleted,
@@ -35,7 +47,12 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         left join sys_user uu on uu.user_id = b.updated_by
     </sql>
 
-	<!-- 按条件分页查询图书：类目筛选传入的是「选中类目 + 其全部下级类目」的ID集合，逐个 find_in_set 匹配 -->
+	<!--
+		按条件分页查询图书。
+		类目筛选传入的是「选中类目 + 其全部下级类目」的ID集合，逐个 find_in_set 匹配，
+		而不是把图书查出来再在 Java 里过滤 —— 后者会让 PageHelper 统计的总数与实际返回行数不符。
+		排序按 id 倒序，新增的图书排在前面。
+	-->
 	<select id="findPage" resultMap="BookVoResult">
 		<include refid="selectBookVo"/>
 		<where>
@@ -60,13 +77,30 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		order by b.id desc
 	</select>
 
-	<!-- 根据主键查询图书 -->
+	<!-- 根据主键查询图书：带上 deleted = 0，已逻辑删除的图书不再对外可见 -->
 	<select id="findById" parameterType="Integer" resultMap="BookVoResult">
 		<include refid="selectBookVo"/>
 		where b.id = #{id} and b.deleted = 0
 	</select>
 
-	<!-- 新增图书 -->
+	<!--
+		查询全部未删除图书，仅取借阅下拉所需字段。
+		与 findPage 的区别有两点：不分页（下拉要能选到任意一本书），
+		且不查 description / images / 审计字段——简介是长文本、图片集是路径串，
+		借出弹窗用不到，查出来只会白白撑大响应体。
+		复用 BookVoResult 映射，未查的字段保持 null，前端不依赖它们。
+	-->
+	<select id="findOptionList" resultMap="BookVoResult">
+		select b.id, b.name, b.author, b.shelf_code, b.stock_quantity
+		from ssk_book b
+		where b.deleted = 0
+		order by b.name asc, b.id asc
+	</select>
+
+	<!--
+		新增图书。审计字段由业务层生成；deleted 固定写 0；
+		cover 也是后端由 images 的第一张派生出来的，不接受前端传值。
+	-->
 	<insert id="create" parameterType="Book" useGeneratedKeys="true" keyProperty="id">
 		insert into ssk_book(
 			name, description, stock_quantity, author, category_ids, shelf_code, cover, images,
@@ -77,13 +111,20 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		)
 	</insert>
 
-	<!-- 修改图书，可编辑字段无条件更新，以便支持清空封面与图片集 -->
+	<!--
+		修改图书。
+		可编辑字段无条件更新（不写 if 判空），这样才能把封面、图片集清空成 NULL；
+		updated_by / updated_at 则用 if 包住，避免调用方没传时把原值覆盖成 NULL。
+		注意：stock_quantity 同样用 if 包住。库存是借阅运营量，图书修改流程不会传该值
+		（业务层会先置空），因此编辑图书不会动库存；库存只能经 updateStockById 按增量变动，
+		否则表单里的过期库存会把借出/归还的结果覆盖掉。
+	-->
 	<update id="updateById" parameterType="Book">
 		update ssk_book
 		<set>
 			name = #{name},
 			description = #{description},
-			stock_quantity = #{stockQuantity},
+			<if test="stockQuantity != null">stock_quantity = #{stockQuantity},</if>
 			author = #{author},
 			category_ids = #{categoryIds},
 			shelf_code = #{shelfCode},
@@ -95,7 +136,10 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		where id = #{id} and deleted = 0
 	</update>
 
-	<!-- 批量逻辑删除图书 -->
+	<!--
+		批量逻辑删除图书：只把 deleted 置 1，不做物理删除，历史借阅记录仍能关联到这本书。
+		条件里带 deleted = 0，重复删除是幂等的（影响行数为 0），也不会改动已删除行的更新时间。
+	-->
 	<update id="deleteByIds">
 		update ssk_book
 		set deleted = 1,
@@ -105,6 +149,23 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 		<foreach collection="ids" item="id" open="(" separator="," close=")">
 			#{id}
 		</foreach>
+	</update>
+
+	<!--
+		按主键调整库存：借出与归还共用一条语句，delta 为正表示回补、为负表示扣减。
+		扣减时带上 stock_quantity + delta >= 0，把「库存不足」的判断交给数据库，
+		避免先查后改的并发窗口（两个请求同时读到库存 1，都以为够借）。
+	-->
+	<update id="updateStockById">
+		update ssk_book
+		set stock_quantity = stock_quantity + #{delta},
+			<if test="updatedBy != null">updated_by = #{updatedBy},</if>
+			updated_at = #{updatedAt}
+		where id = #{id}
+		<if test="delta &lt; 0">
+			and deleted = 0
+			and stock_quantity + #{delta} &gt;= 0
+		</if>
 	</update>
 
 </mapper>
