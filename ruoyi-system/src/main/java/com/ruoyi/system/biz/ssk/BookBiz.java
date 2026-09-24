@@ -13,7 +13,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.SecurityUtils;
-import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.system.domain.Book;
 import com.ruoyi.system.domain.BookCategory;
 import com.ruoyi.system.domain.vo.BookVo;
@@ -27,41 +26,20 @@ import com.ruoyi.system.service.IBookService;
  * <p>承接 controller 与 service 之间的业务编排，包含以下规则：</p>
  * <ul>
  *     <li>查询条件为空时不参与过滤，类目筛选为「选中类目 + 其全部下级类目」；</li>
- *     <li>类目ID集统一去重、去空格后按英文逗号拼接，并校验类目确实存在；</li>
- *     <li>图片集最多 5 张，统一去重去空格后按英文逗号拼接，封面固定取第一张图；</li>
  *     <li>库存是借阅运营量：新增时接受初始库存，修改时忽略（库存只由借出/归还按增量变动）；</li>
  *     <li>创建人、创建时间、更新人、更新时间、逻辑删除标记全部由后端生成，不接受前端传入。</li>
  * </ul>
+ *
+ * <p>字段层面的校验与规范化（长度上限、类目ID格式、图片集张数、库存默认值与下限）
+ * 集中在 {@link BookFieldRules}，本类只负责编排：取数据、定顺序、补审计字段。
+ * 这样分开的好处是字段规则可以脱离 Spring 上下文直接测，本类也不会因为
+ * 规则越加越多而突破工程规范的类行数上限。</p>
  *
  * @author ruoyi
  */
 @Component
 public class BookBiz
 {
-    /** 书籍名称最大长度，与 ssk_book.name 字段长度保持一致 */
-    private static final int NAME_MAX_LENGTH = 255;
-
-    /** 书籍描述最大长度，与 ssk_book.description 字段长度保持一致 */
-    private static final int DESCRIPTION_MAX_LENGTH = 500;
-
-    /** 作者最大长度，与 ssk_book.author 字段长度保持一致 */
-    private static final int AUTHOR_MAX_LENGTH = 255;
-
-    /** 类目ID集最大长度，与 ssk_book.category_ids 字段长度保持一致 */
-    private static final int CATEGORY_IDS_MAX_LENGTH = 255;
-
-    /** 书架号最大长度，与 ssk_book.shelf_code 字段长度保持一致 */
-    private static final int SHELF_CODE_MAX_LENGTH = 255;
-
-    /** 图片集最大长度，与 ssk_book.images 字段长度保持一致 */
-    private static final int IMAGES_MAX_LENGTH = 500;
-
-    /** 图片集最多张数 */
-    private static final int IMAGES_MAX_COUNT = 5;
-
-    /** 默认库存 */
-    private static final int DEFAULT_STOCK_QUANTITY = 1;
-
     @Autowired
     private IBookService bookService;
 
@@ -81,9 +59,9 @@ public class BookBiz
         if (book != null)
         {
             // 查询条件统一去空格，空串按未填写处理
-            query.setName(normalizeQueryText(book.getName()));
-            query.setAuthor(normalizeQueryText(book.getAuthor()));
-            query.setShelfCode(normalizeQueryText(book.getShelfCode()));
+            query.setName(BookFieldRules.normalizeQueryText(book.getName()));
+            query.setAuthor(BookFieldRules.normalizeQueryText(book.getAuthor()));
+            query.setShelfCode(BookFieldRules.normalizeQueryText(book.getShelfCode()));
         }
         return bookService.findPage(query, resolveCategoryIds(categoryId));
     }
@@ -125,6 +103,24 @@ public class BookBiz
     }
 
     /**
+     * 根据主键查询图书详情（终端浏览用）
+     *
+     * <p>与列表共用同一条查询（{@link #findById}）与同一套字段投影，
+     * 因此详情里看到的书名、作者、简介、图片集与列表里那一本必然一致 ——
+     * 若在详情侧重写一条 SQL，将来加了字段很容易只补一处。</p>
+     *
+     * <p>图书不存在或已被逻辑删除时，{@code requireBook} 抛出可读的业务异常，
+     * 由全局异常处理器转成提示，终端不会拿到一个空壳对象去渲染空白详情。</p>
+     *
+     * @param id 图书ID
+     * @return 图书详情（仅终端可见字段）
+     */
+    public ClientBookVo findClientById(Integer id)
+    {
+        return toClientBook(findById(id));
+    }
+
+    /**
      * 把图书展示对象裁剪为终端可见字段
      *
      * @param source 含审计字段的图书展示对象
@@ -162,7 +158,7 @@ public class BookBiz
         // 库存只在新增时有意义：为空按默认库存处理，负数在这里被拒绝。
         // 校验放在调用方而不是 applyEditableFields 里，是为了让"修改图书"完全不碰库存
         // —— 被忽略的字段不应该还能让整单失败。
-        book.setStockQuantity(normalizeStockQuantity(book.getStockQuantity()));
+        book.setStockQuantity(BookFieldRules.normalizeStockQuantity(book.getStockQuantity()));
         // 主键与审计字段一律由后端生成
         book.setId(null);
         book.setCreatedBy(currentUserId());
@@ -239,20 +235,24 @@ public class BookBiz
      * <p>刻意不含库存：库存在新增与修改下的归属不同（新增落初始库存、修改完全忽略），
      * 由各自的调用方显式处理，见 {@link #create} 与 {@link #updateById}。</p>
      *
+     * <p>具体规则在 {@link BookFieldRules}，这里只按顺序把结果写回实体。</p>
+     *
      * @param book       图书信息，方法内直接修改该对象
      * @param categories 全部未删除的类目，用于校验类目ID是否合法
      */
     private void applyEditableFields(Book book, List<BookCategory> categories)
     {
-        book.setName(requireText(book.getName(), NAME_MAX_LENGTH, "书籍名称"));
-        book.setDescription(requireText(book.getDescription(), DESCRIPTION_MAX_LENGTH, "书籍描述"));
-        book.setAuthor(requireText(book.getAuthor(), AUTHOR_MAX_LENGTH, "作者"));
-        book.setShelfCode(requireText(book.getShelfCode(), SHELF_CODE_MAX_LENGTH, "书架号"));
-        book.setCategoryIds(normalizeCategoryIds(book.getCategoryIds(), categories));
-        String images = normalizeImages(book.getImages());
+        book.setName(BookFieldRules.requireText(book.getName(), BookFieldRules.NAME_MAX_LENGTH, "书籍名称"));
+        book.setDescription(BookFieldRules.requireText(book.getDescription(),
+                BookFieldRules.DESCRIPTION_MAX_LENGTH, "书籍描述"));
+        book.setAuthor(BookFieldRules.requireText(book.getAuthor(), BookFieldRules.AUTHOR_MAX_LENGTH, "作者"));
+        book.setShelfCode(BookFieldRules.requireText(book.getShelfCode(),
+                BookFieldRules.SHELF_CODE_MAX_LENGTH, "书架号"));
+        book.setCategoryIds(BookFieldRules.normalizeCategoryIds(book.getCategoryIds(), categories));
+        String images = BookFieldRules.normalizeImages(book.getImages());
         book.setImages(images);
         // 封面固定为图片集的第一张图，空图片集时封面置空
-        book.setCover(firstImage(images));
+        book.setCover(BookFieldRules.firstImage(images));
     }
 
     /**
@@ -288,172 +288,6 @@ public class BookBiz
             {
                 PageHelper.setLocalPage(page);
             }
-        }
-    }
-
-    /**
-     * 校验并返回规范化的类目ID集，多个类目按英文逗号拼接
-     *
-     * @param categoryIds 前端提交的类目ID集
-     * @param categories  全部未删除的类目
-     * @return 规范化后的类目ID集
-     */
-    private String normalizeCategoryIds(String categoryIds, List<BookCategory> categories)
-    {
-        Set<Integer> existingIds = new HashSet<>();
-        for (BookCategory category : categories)
-        {
-            existingIds.add(category.getId());
-        }
-        Set<Integer> selectedIds = new LinkedHashSet<>();
-        for (String part : split(categoryIds))
-        {
-            Integer categoryId = parseCategoryId(part);
-            if (!existingIds.contains(categoryId))
-            {
-                throw new ServiceException("所选类目不存在或已被删除，请重新选择");
-            }
-            selectedIds.add(categoryId);
-        }
-        if (selectedIds.isEmpty())
-        {
-            throw new ServiceException("请至少选择一个类目");
-        }
-        String joined = StringUtils.join(selectedIds, ",");
-        if (joined.length() > CATEGORY_IDS_MAX_LENGTH)
-        {
-            throw new ServiceException("所选类目过多，类目ID集长度不能超过" + CATEGORY_IDS_MAX_LENGTH + "个字符");
-        }
-        return joined;
-    }
-
-    /**
-     * 校验并返回规范化的图片集，最多 {@link #IMAGES_MAX_COUNT} 张
-     *
-     * @param images 前端提交的图片集
-     * @return 规范化后的图片集，无图片时返回 null
-     */
-    private String normalizeImages(String images)
-    {
-        Set<String> selected = new LinkedHashSet<>(split(images));
-        if (selected.size() > IMAGES_MAX_COUNT)
-        {
-            throw new ServiceException("图片集最多上传" + IMAGES_MAX_COUNT + "张图片");
-        }
-        String joined = StringUtils.join(selected, ",");
-        if (joined.length() > IMAGES_MAX_LENGTH)
-        {
-            throw new ServiceException("图片集长度不能超过" + IMAGES_MAX_LENGTH + "个字符");
-        }
-        return StringUtils.isEmpty(joined) ? null : joined;
-    }
-
-    /**
-     * 取图片集中的第一张图作为封面
-     *
-     * @param images 规范化后的图片集
-     * @return 封面地址，无图片时返回 null
-     */
-    private String firstImage(String images)
-    {
-        List<String> parts = split(images);
-        return parts.isEmpty() ? null : parts.get(0);
-    }
-
-    /**
-     * 校验并返回必填文本字段
-     *
-     * @param value     字段值
-     * @param maxLength 字段最大长度
-     * @param label     字段中文名，用于提示信息
-     * @return 去除首尾空格后的字段值
-     */
-    private String requireText(String value, int maxLength, String label)
-    {
-        String trimmed = StringUtils.trim(value);
-        if (StringUtils.isEmpty(trimmed))
-        {
-            throw new ServiceException(label + "不能为空");
-        }
-        if (trimmed.length() > maxLength)
-        {
-            throw new ServiceException(label + "长度不能超过" + maxLength + "个字符");
-        }
-        return trimmed;
-    }
-
-    /**
-     * 查询条件去空格，空串按未填写处理
-     *
-     * @param value 条件值
-     * @return 处理后的条件值，未填写时返回 null
-     */
-    private String normalizeQueryText(String value)
-    {
-        String trimmed = StringUtils.trim(value);
-        return StringUtils.isEmpty(trimmed) ? null : trimmed;
-    }
-
-    /**
-     * 校验并返回规范化的库存，空值按默认库存处理
-     *
-     * <p>只被新增流程调用：图书创建时必须落一个初始库存，负数在这里被拒绝。</p>
-     *
-     * @param stockQuantity 新增时提交的初始库存
-     * @return 归一化后的库存
-     */
-    private Integer normalizeStockQuantity(Integer stockQuantity)
-    {
-        if (stockQuantity == null)
-        {
-            return DEFAULT_STOCK_QUANTITY;
-        }
-        if (stockQuantity.intValue() < 0)
-        {
-            throw new ServiceException("库存不能小于0");
-        }
-        return stockQuantity;
-    }
-
-    /**
-     * 按英文逗号拆分并去掉空串与首尾空格
-     *
-     * @param value 待拆分文本
-     * @return 拆分结果
-     */
-    private List<String> split(String value)
-    {
-        List<String> result = new ArrayList<>();
-        if (StringUtils.isEmpty(value))
-        {
-            return result;
-        }
-        for (String part : value.split(","))
-        {
-            String trimmed = StringUtils.trim(part);
-            if (StringUtils.isNotEmpty(trimmed))
-            {
-                result.add(trimmed);
-            }
-        }
-        return result;
-    }
-
-    /**
-     * 把类目ID文本解析为整数
-     *
-     * @param text 类目ID文本
-     * @return 类目ID
-     */
-    private Integer parseCategoryId(String text)
-    {
-        try
-        {
-            return Integer.valueOf(text);
-        }
-        catch (NumberFormatException e)
-        {
-            throw new ServiceException("类目ID格式不正确：" + text);
         }
     }
 

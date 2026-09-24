@@ -56,7 +56,7 @@ public class Book
      * （修改图书完全不碰库存，由借出/归还维护），所以这里刻意不加 {@code @NotNull} 与 {@code @Min}：
      * 加了会让「修改图书」因为一个它根本不用、也不提交的字段被参数校验拦下。</p>
      *
-     * <p>库存的校验全部收在 {@code BookBiz.normalizeStockQuantity}（只被新增流程调用）：
+     * <p>库存的校验全部收在 {@code BookFieldRules.normalizeStockQuantity}（只被新增流程调用）：
      * 为空落默认库存 1，负数抛「库存不能小于0」。前端另外用 {@code el-input-number :min="0"} 做界面层限制。</p>
      */
     private Integer stockQuantity;

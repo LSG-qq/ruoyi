@@ -1,12 +1,17 @@
 <template>
+  <!--
+    借阅确认弹窗。标题与按钮都用「确认借阅」，与需求里的二次确认口径一致：
+    列表/详情上点「申请借阅」是第一步，这里是第二步 —— 把「借哪一本」再明确一次，
+    避免误触直接产生一条申请记录。
+  -->
   <el-dialog
-    title="提交借阅申请"
+    title="确认借阅"
     :visible.sync="visible"
     width="440px"
     append-to-body
     @closed="reset"
   >
-    <p class="apply-book">《{{ book.name }}》</p>
+    <p class="apply-book">{{ confirmText }}</p>
 
     <el-form label-width="90px">
       <el-form-item label="借阅天数">
@@ -23,7 +28,7 @@
 
     <div slot="footer">
       <el-button @click="visible = false">取 消</el-button>
-      <el-button type="primary" :loading="submitting" @click="submit">提交申请</el-button>
+      <el-button type="primary" :loading="submitting" @click="submit">确认借阅</el-button>
     </div>
   </el-dialog>
 </template>
@@ -32,7 +37,7 @@
 import { createBorrowRequest, borrowDayLimits } from '@/api/client/borrowRequest'
 
 /**
- * 借阅申请弹窗。
+ * 借阅申请确认弹窗。
  *
  * <p>按 client-front 代码规范单独封装为组件：对外只暴露 {@link #open}，父页面通过
  * `ref` 调用它来打开窗口（`this.$refs.applyDialog.open(book)`），
@@ -43,6 +48,11 @@ import { createBorrowRequest, borrowDayLimits } from '@/api/client/borrowRequest
  * <p>组件目录沿用工程既有样板：放在页面目录下的 components/ 子目录
  * （对齐 ruoyi-ui 的 `views/ssk/<模块>/components/XxxForm.vue`），
  * 弹窗与使用它的页面待在一起，比堆到顶层 src/components/ 更好找。</p>
+ *
+ * <p><b>为什么这里还留着「借阅天数」而不仅是一句确认</b>：天数由囚犯在申请时自选、
+ * 之后审核人默认沿用这个值，所以它必须在**提交那一刻**定下来。
+ * 若退化成纯确认框，天数只能落后端默认值，等于把已经做好的「自选天数」丢掉。
+ * 于是这个框同时承担两件事：把「借哪一本」再确认一次，并把天数填上。</p>
  *
  * <p>提交成功只发一个 `success` 事件、不主动刷新父页面列表：提交申请不占用库存，
  * 图书列表无需重查（用户可在「我的申请」页看到这条新记录）。</p>
@@ -76,6 +86,14 @@ export default {
         minDays: 1,
         maxDays: 365
       }
+    }
+  },
+
+  computed: {
+    /** 二次确认的提示语。书名可能先于详情到达，取不到时用「这本」兜底，不出现空书名号 */
+    confirmText() {
+      const name = this.book.name
+      return name ? `确认借阅《${name}》书籍吗？` : '确认借阅这本图书吗？'
     }
   },
 
@@ -131,13 +149,19 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+// ---------------------------------------------------------------
+// 确认语。原来是一句「《书名》」的标题，现在换成一整句话，
+// 因此字重从 600 降到 500、字号回到正文档 —— 整句话用粗体喊出来会显得很吵。
+// ---------------------------------------------------------------
 .apply-book {
-  margin: 0 0 18px;
+  margin: 0 0 20px;
   font-size: var(--client-font-md);
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1.6;
   color: var(--client-text-primary);
 }
 
+// 天数范围提示：贴着输入框右侧，字号最小、颜色最淡，只做说明不抢注意力
 .day-tip {
   margin-left: 12px;
   font-size: var(--client-font-xs);

@@ -23,6 +23,10 @@
 :root {
   /* 主色与状态色 */
   --client-primary: #{$client-primary};
+  --client-primary-light: #{$client-primary-light};
+  --client-primary-dark: #{$client-primary-dark};
+  --client-primary-soft: #{$client-primary-soft};
+  --client-primary-glow: #{$client-primary-glow};
   --client-success: #{$client-success};
   --client-warning: #{$client-warning};
   --client-danger: #{$client-danger};
@@ -36,6 +40,12 @@
   --client-bg-card: #{$client-bg-card};
   --client-bg-muted: #{$client-bg-muted};
   --client-border: #{$client-border};
+  --client-border-light: #{$client-border-light};
+
+  /* 阴影 */
+  --client-shadow-card: #{$client-shadow-card};
+  --client-shadow-hover: #{$client-shadow-hover};
+  --client-shadow-primary: #{$client-shadow-primary};
 
   /* 字号 */
   --client-font-title: #{$client-font-title};
@@ -48,8 +58,11 @@
   /* 间距与圆角 */
   --client-gap: #{$client-gap};
   --client-gap-sm: #{$client-gap-sm};
+  --client-gap-lg: #{$client-gap-lg};
   --client-radius: #{$client-radius};
   --client-radius-card: #{$client-radius-card};
+  --client-radius-lg: #{$client-radius-lg};
+  --client-radius-pill: #{$client-radius-pill};
   --client-tap-height: #{$client-tap-height};
 }
 
@@ -87,9 +100,24 @@ a {
   text-decoration: none;
 }
 
+/* 内容区在触屏上不可见地滚动条会更好看，但终端用鼠标的场合也不少，保留默认宽度 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(144, 147, 153, 0.35);
+  border-radius: $client-radius-pill;
+
+  &:hover {
+    background-color: rgba(144, 147, 153, 0.55);
+  }
+}
+
 /* 触摸屏没有鼠标悬停，指到哪一行要更明显地反馈出来 */
 .el-table--enable-row-hover .el-table__body tr:hover > td {
-  background-color: #ecf5ff;
+  background-color: $client-primary-soft;
 }
 
 /* ------------------------------------------------------------------
@@ -113,4 +141,17 @@ a {
 .btn-large {
   padding: 12px 26px;
   font-size: $client-font-md;
+}
+
+/*
+  主色渐变。给需要「有层次的主色块」用（主按钮、选中态），
+  135deg 从左上到右下，与 $client-primary 同源，换主色时同步改 theme.scss 即可。
+*/
+.gradient-primary {
+  background-image: linear-gradient(
+    135deg,
+    $client-primary-light 0%,
+    $client-primary 55%,
+    $client-primary-dark 100%
+  );
 }

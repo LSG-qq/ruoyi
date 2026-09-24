@@ -1,0 +1,25 @@
+[Unit]
+Description=RuoYi Admin (ruoyi-admin.jar, port 8080)
+Documentation=file:/home/ruoyi/app/DEPLOY.md
+# 若 MySQL / Redis 是同机服务且 unit 名不同，按实际改成 mysqld.service / redis-server.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ruoyi
+Group=ruoyi
+WorkingDirectory=/home/ruoyi/app
+
+ExecStart=/usr/bin/java -Xms512m -Xmx1024m -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=512m \
+  -Duser.timezone=Asia/Shanghai -Dname=ruoyi-admin.jar \
+  -jar /home/ruoyi/app/ruoyi-admin.jar
+
+SuccessExitStatus=143
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ruoyi/logs/admin-console.log
+StandardError=append:/home/ruoyi/logs/admin-console.log
+
+[Install]
+WantedBy=multi-user.target

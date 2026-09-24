@@ -6,14 +6,17 @@
 	
     <groupId>com.ruoyi</groupId>
     <artifactId>ruoyi</artifactId>
-    <version>3.9.2</version>
+    <version>1.0.0</version>
 
     <name>ruoyi</name>
     <url>http://www.ruoyi.vip</url>
     <description>若依管理系统</description>
     
     <properties>
-        <ruoyi.version>3.9.2</ruoyi.version>
+        <!-- 各模块互相依赖（ruoyi-common / framework / system / quartz / generator）时统一用这个版本号。
+             必须与上面第 9 行的 <version> 保持一致：这里写死 3.9.2 会让命令行 Maven 去远程仓库找
+             不存在的 ruoyi-system:3.9.2 并直接 BUILD FAILURE（IDEA 走模块依赖，不会暴露这个问题）。 -->
+        <ruoyi.version>${project.version}</ruoyi.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <java.version>17</java.version>
@@ -174,13 +177,13 @@
     </dependencyManagement>
 
     <modules>
-        <module>ruoyi-admin</module>
-        <module>ruoyi-client</module>
+        <module>ruoyi-common</module>
         <module>ruoyi-framework</module>
         <module>ruoyi-system</module>
         <module>ruoyi-quartz</module>
         <module>ruoyi-generator</module>
-        <module>ruoyi-common</module>
+        <module>ruoyi-client</module>
+        <module>ruoyi-admin</module>
     </modules>
     <packaging>pom</packaging>
 

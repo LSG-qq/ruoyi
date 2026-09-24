@@ -7,11 +7,22 @@
         <span>图书借阅终端</span>
       </div>
       <div class="header-user">
-        <span class="user-text">
-          {{ nickName || '—' }}
-          <em v-if="prisonerNumber">（囚号 {{ prisonerNumber }}）</em>
-        </span>
-        <el-button type="text" icon="el-icon-switch-button" @click="handleLogout">退出</el-button>
+        <template v-if="isLoggedIn">
+          <span class="user-text">
+            {{ nickName || '—' }}
+            <em v-if="prisonerNumber">（囚号 {{ prisonerNumber }}）</em>
+          </span>
+          <el-button type="text" icon="el-icon-switch-button" @click="handleLogout">退出</el-button>
+        </template>
+
+        <!--
+          未登录态：首页是免登录可浏览的，所以顶栏必须能表达「当前是游客」，
+          并且给出一个明确的登录入口 —— 否则用户只能靠去点「我的申请」被弹回来才发现要登录。
+        -->
+        <template v-else>
+          <span class="user-text">未登录，当前仅可浏览图书</span>
+          <el-button type="text" icon="el-icon-user" @click="goLogin">登录</el-button>
+        </template>
       </div>
     </header>
 
@@ -52,6 +63,11 @@ import { constantRoutes } from '@/router'
  * <p>顶栏显示的是「姓名（囚号 20260001）」而不是登录名 —— 姓名便于现场核对，
  * 囚号才是业务上的唯一标识，两个都放在眼前省得来回对。</p>
  *
+ * <p><b>未登录也是本布局的一种正常状态</b>：首页（图书浏览）免登录可访问，
+ * 见 router 的守卫白名单。未登录时顶栏显示「未登录」与登录入口，
+ * 并且**不去请求 /client/profile** —— 那个接口需要登录，匿名调用会拿到 401，
+ * 进而在首页弹出一个「登录状态已过期」的确认框，把「本来就没登录」误报成「登录过期了」。</p>
+ *
  * <p>顶栏高度取 62px：比 element-ui 默认的导航栏略高，长时间盯屏时头部不那么局促；
  * 终端屏幕上这点高度很划算，不必为了省几十像素把信息挤在一起。</p>
  */
@@ -60,6 +76,11 @@ export default {
 
   computed: {
     ...mapGetters(['prisonerNumber', 'nickName']),
+
+    /** 是否已登录。未登录时首页照样能看，只是不能提交借阅申请 */
+    isLoggedIn() {
+      return !!this.$store.getters.token
+    },
 
     /** 菜单数据：取根路由的 children（/login 那种 hidden 的路由不在里面） */
     menuRoutes() {
@@ -75,8 +96,9 @@ export default {
 
   created() {
     // 刷新页面后 store 是空的（令牌在 Cookie 里还在），
-    // 囚号与姓名需要重新拉一次，否则顶栏会显示成空
-    if (!this.prisonerNumber) {
+    // 囚号与姓名需要重新拉一次，否则顶栏会显示成空。
+    // 未登录时跳过：既没有可拉的信息，也会白白拿到一个 401
+    if (this.isLoggedIn && !this.prisonerNumber) {
       this.$store.dispatch('GetInfo').catch(() => {
         // 拉不到不算致命错误（例如令牌刚过期），
         // 后续任何一次业务请求拿到 401 时都会统一跳回登录页
@@ -85,6 +107,15 @@ export default {
   },
 
   methods: {
+    /**
+     * 去登录页，并带上当前地址。
+     *
+     * <p>登录成功后会回到这里，用户原来在浏览的位置不至于丢掉。</p>
+     */
+    goLogin() {
+      this.$router.push({ path: '/login', query: { redirect: this.$route.fullPath } })
+    },
+
     /**
      * 退出登录。
      *
@@ -163,7 +194,8 @@ export default {
 }
 
 .client-main {
-  /* 撑满剩余高度并单独滚动，顶部栏与菜单始终留在视野里 */
+  /* 撑满剩余高度并单独滚动，顶部栏与菜单始终留在视野里。
+     首页把这段高度整块吃掉，内部再自己分栏滚动（见 views/book/index.vue） */
   flex: 1;
   overflow: auto;
   padding: 18px;
